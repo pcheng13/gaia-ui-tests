@@ -11,7 +11,7 @@ class TestSettingsWifi(GaiaTestCase):
     _wifi_menu_item_locator = ('id', 'menuItem-wifi')
     _wifi_enabled_label_locator = ('css selector', '#wifi-enabled label')
     _wifi_enabled_checkbox_locator = ('css selector', '#wifi-enabled input')
-    _available_networks_locator = ('css selector', '#wifi-availableNetworks li[class^="wifi-signal"]')
+    _available_networks_locator = ('css selector', '#wifi-availableNetworks > li > a[class*="wifi-signal"]')
     _password_input_locator = ('css selector', '#wifi-auth input[type="password"]')
     _password_ok_button_locator = ('css selector', '#wifi-auth button[type="submit"]')
     _connected_message_locator = ('css selector', '#wifi-availableNetworks li.active small')
