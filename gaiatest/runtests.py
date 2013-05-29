@@ -122,8 +122,8 @@ class GaiaTestRunner(MarionetteTestRunner):
                 if os.path.exists(source):
                     links.update({'HTML Source': source})
 
-                for name, path in links.iteritems():
-                    links_html.append(html.a(name, href=path))
+                for link_name, path in links.iteritems():
+                    links_html.append(html.a(link_name, href=path))
                     links_html.append(' ')
 
                 if 'Screenshot' in links:
