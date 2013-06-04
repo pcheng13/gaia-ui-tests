@@ -41,7 +41,7 @@ setup(name='gaiatest',
       url='https://developer.mozilla.org/en-US/docs/Marionette',
       license='MPL',
       packages=find_packages(exclude=['ez_setup', 'examples', 'tests']),
-      package_data={'gaiatest': ['atoms/*.js']},
+      package_data={'gaiatest': ['atoms/*.js', 'resources/style.css', 'resources/*.js']},
       include_package_data=True,
       zip_safe=False,
       entry_points="""

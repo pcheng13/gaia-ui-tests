@@ -25,7 +25,6 @@ class GaiaTestOptions(MarionetteTestOptions):
         group.add_option('--html-output',
                          action='store',
                          dest='html_output',
-                         default='output.html',
                          help='html output')
 
 class GaiaTestRunner(MarionetteTestRunner):
@@ -103,36 +102,9 @@ class GaiaTestRunner(MarionetteTestRunner):
             cls_name = test.__class__.__name__
             name = unicode(test).split()[0]
             tc_time = str(test.duration)
-            additional_html = []
-            links = {}
-            links_html = []
+
+            err_msg = []
             if result in ['failure', 'error', 'skipped']:
-                debug_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'debug', cls_name))
-                
-                # add screenshot link
-                screenshot = os.path.join(debug_path, name + '_screenshot.png')
-                if os.path.exists(screenshot):
-                    links.update({'Screenshot': screenshot})
-                # add settings link
-                setting = os.path.join(debug_path, name + '_settings.json')
-                if os.path.exists(setting):
-                    links.update({'Settings': setting})
-                # add source.txt link
-                source = os.path.join(debug_path, name + '_source.txt')
-                if os.path.exists(source):
-                    links.update({'HTML Source': source})
-
-                for link_name, path in links.iteritems():
-                    links_html.append(html.a(link_name, href=path))
-                    links_html.append(' ')
-
-                if 'Screenshot' in links:
-                    additional_html.append(
-                        html.div(
-                            html.a(html.img(src=links['Screenshot']),
-                                   href=links['Screenshot']),
-                            class_='screenshot'))
-
                 log = html.div(class_ = result)
                 for line in text.splitlines():
                     separator = line.startswith(' ' * 10)
@@ -144,14 +116,13 @@ class GaiaTestRunner(MarionetteTestRunner):
                         else:
                             log.append(raw(cgi.escape(line)))
                     log.append(html.br())
-                additional_html.append(log)
+                err_msg.append(log)
 
             test_logs.append(html.tr([html.td(result, class_='col-result'),
                          html.td(cls_name, class_='col-class'),
                          html.td(name, class_='col-name'),
                          html.td(tc_time, class_='col-duration'),
-                         html.td(links_html, class_='col-links'),
-                         html.td(additional_html, class_='debug')
+                         html.td(err_msg, class_='debug')
                          ], class_=result.lower() + ' results-table-row'))
 
         for results in results_list:
@@ -203,8 +174,8 @@ class GaiaTestRunner(MarionetteTestRunner):
                                 html.th('Result', class_='sortable', col='result'),
                                 html.th('Class', class_='sortable', col='class'),
                                 html.th('Name', class_='sortable', col='name'),
-                                html.th('Duration', class_='sortable numeric', col='duration'),
-                                html.th('Links')]), id='results-table-head'),
+                                html.th('Duration', class_='sortable numeric', col='duration')
+                                ]), id='results-table-head'),
                                 html.tbody(test_logs, id='results-table-body')], id='results-table')
             )
         )
