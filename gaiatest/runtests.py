@@ -2,14 +2,49 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import cgi
+import datetime
+import json
+import os
+import sys
 import textwrap
-import time, os, datetime, cgi
+import time
+import base64
+
 from py.xml import html
 from py.xml import raw
-from gaiatest import GaiaTestCase
 from marionette import MarionetteTestOptions
+from marionette import MarionetteTestResult
 from marionette import MarionetteTestRunner
+from marionette import MarionetteTextTestRunner
 from marionette.runtests import cli
+
+from gaiatest import GaiaTestCase
+
+
+class GaiaTestResult(MarionetteTestResult):
+
+    def addError(self, test, err):
+        self.errors.append((test, self._exc_info_to_string(err, test), self.gather_debug()))
+
+    def addFailure(self, test, err):
+        self.failures.append((test, self._exc_info_to_string(err, test), self.gather_debug()))
+
+    def gather_debug(self):
+        debug = {}
+        try:
+            debug['screenshot'] = self.marionette.screenshot()[22:]
+            debug['source'] = self.marionette.page_source
+            self.marionette.switch_to_frame()
+            debug['settings'] = json.dumps(self.marionette.execute_async_script("""
+SpecialPowers.addPermission('settings-read', true, document);
+var req = window.navigator.mozSettings.createLock().get('*');
+req.onsuccess = function() {
+  marionetteScriptFinished(req.result);
+}""", special_powers=True))
+        except:
+            pass
+        return debug
 
 
 class GaiaTestOptions(MarionetteTestOptions):
@@ -31,6 +66,7 @@ class GaiaTestRunner(MarionetteTestRunner):
 
     def __init__(self, html_output=None, **kwargs):
         MarionetteTestRunner.__init__(self, **kwargs)
+        self.textrunnerclass = GaiaTextTestRunner
 
         width = 80
         if not self.testvars.get('acknowledged_risks') is True:
@@ -76,13 +112,16 @@ class GaiaTestRunner(MarionetteTestRunner):
         MarionetteTestRunner.run_tests(self, tests)
 
         if self.html_output:
+            # change default encoding to avoid encoding problem for page source
+            reload(sys)
+            sys.setdefaultencoding('utf-8')
             html_dir = os.path.dirname(os.path.abspath(self.html_output))
             if not os.path.exists(html_dir):
                 os.makedirs(html_dir)
             with open(self.html_output, 'w') as f:
                 f.write(self.generate_html(self.results))
 
-    def generate_html(self, results_list):	
+    def generate_html(self, results_list):
 
         def failed_count(results):
             count = len(results.failures)
@@ -94,18 +133,36 @@ class GaiaTestRunner(MarionetteTestRunner):
         failures = sum([failed_count(results) for results in results_list])
         skips = sum([len(results.skipped) + len(results.expectedFailures) for results in results_list])
         errors = sum([len(results.errors) for results in results_list])
-        passes = tests - failures - skips - errors
+        passes = 0
         test_time = self.elapsedtime.total_seconds()
         test_logs = []
 
-        def _extract_html(test, text='', result='passed'):
+        def _extract_html(test, text='', result='passed', debug=None):
             cls_name = test.__class__.__name__
-            name = unicode(test).split()[0]
+            tc_name = unicode(test).split()[0]
             tc_time = str(test.duration)
+            additional_html = []
+            links_html = []
 
-            err_msg = []
             if result in ['failure', 'error', 'skipped']:
-                log = html.div(class_ = result)
+                if debug and debug.get('screenshot'):
+                    screenshot = 'data:image/png;base64,%s' % debug['screenshot']
+                    additional_html.append(
+                        html.div(
+                            html.a(html.img(src=screenshot), href=screenshot), class_='screenshot'))
+                for name, content in debug.items():
+                    try:
+                        if 'screenshot' in name:
+                            links_html.append(html.a(name, href='data:image/png;base64,%s' % content.encode('us-ascii')))
+                        else:
+                            # use base64 to avoid that some browser(such as Firefox, Opera) treats '#' as the start of another link if the data URL contains.
+                            # use 'charset=utf-8' to show special characters like Chinese.
+                            links_html.append(html.a(name, href='data:text/plain;charset=utf-8;base64,%s' % base64.b64encode(content)))
+                        links_html.append(' ')
+                    except:
+                        pass
+
+                log = html.div(class_=result)
                 for line in text.splitlines():
                     separator = line.startswith(' ' * 10)
                     if separator:
@@ -116,36 +173,29 @@ class GaiaTestRunner(MarionetteTestRunner):
                         else:
                             log.append(raw(cgi.escape(line)))
                     log.append(html.br())
-                err_msg.append(log)
+                additional_html.append(log)
 
-            test_logs.append(html.tr([html.td(result, class_='col-result'),
-                         html.td(cls_name, class_='col-class'),
-                         html.td(name, class_='col-name'),
-                         html.td(tc_time, class_='col-duration'),
-                         html.td(err_msg, class_='debug')
-                         ], class_=result.lower() + ' results-table-row'))
+            test_logs.append(html.tr([
+                html.td(result, class_='col-result'),
+                html.td(cls_name, class_='col-class'),
+                html.td(tc_name, class_='col-name'),
+                html.td(tc_time, class_='col-duration'),
+                html.td(links_html, class_='col-links'),
+                html.td(additional_html, class_='debug')],
+                class_=result.lower() + ' results-table-row'))
 
         for results in results_list:
-            for tup in results.errors:
-                _extract_html(*tup, result='error')
-            for tup in results.failures:
-                _extract_html(*tup, result='failure')
-            if hasattr(results, 'unexpectedSuccesses'):
-                for test in results.unexpectedSuccesses:
-                    # unexpectedSuccesses is a list of Testcases only, no tuples
-                    _extract_html(test, text='TEST-UNEXPECTED-PASS', result='failure')
-            if hasattr(results, 'skipped'):
-                for tup in results.skipped:
-                    _extract_html(*tup, result='skipped')
-            if hasattr(results, 'expectedFailures'):
-                for tup in results.expectedFailures:
-                    _extract_html(*tup, result='skipped')
             for test in results.tests_passed:
                 _extract_html(test)
+                passes = passes + 1
+            for result in results.failures:
+                _extract_html(result[0], text=result[1], result='failure', debug=result[2])
+            for result in results.errors:
+                _extract_html(result[0], text=result[1], result='error', debug=result[2])
 
-            jquery_src = os.path.abspath(os.path.join(os.path.dirname(__file__), 'resources','jquery.js'))
-            main_src = os.path.abspath(os.path.join(os.path.dirname(__file__), 'resources','main.js'))
-            style_src = os.path.abspath(os.path.join(os.path.dirname(__file__), 'resources','style.css'))
+            jquery_src = os.path.abspath(os.path.join(os.path.dirname(__file__), 'resources', 'jquery.js'))
+            main_src = os.path.abspath(os.path.join(os.path.dirname(__file__), 'resources', 'main.js'))
+            style_src = os.path.abspath(os.path.join(os.path.dirname(__file__), 'resources', 'style.css'))
 
         generated = datetime.datetime.now()
         doc = html.html(
@@ -155,32 +205,38 @@ class GaiaTestRunner(MarionetteTestRunner):
                 html.link(rel='stylesheet', href=style_src),
                 html.script(src=jquery_src),
                 html.script(src=main_src)),
-                html.body(
+            html.body(
                 html.p('Report generated on %s at %s' % (
                     generated.strftime('%d-%b-%Y'),
                     generated.strftime('%H:%M:%S'))),
-                    html.table(
-                        html.h2('Summary'),
-                        html.p('%i tests ran. in %i seconds' % (tests, test_time),
-                            html.br(),
-                            html.span('%i passed' % passes, class_='passed'), ', ',
-                            html.span('%i failed' % failures, class_='failed'), ', ',
-                            html.span('%i skipped' % skips, class_='skipped'), ', ',
-                            html.span('%i error' % errors, class_='error'),
-                            html.br()),
-                        html.h2('Results'),
-                        html.table([html.thead(
-                            html.tr([
-                                html.th('Result', class_='sortable', col='result'),
-                                html.th('Class', class_='sortable', col='class'),
-                                html.th('Name', class_='sortable', col='name'),
-                                html.th('Duration', class_='sortable numeric', col='duration')
-                                ]), id='results-table-head'),
-                                html.tbody(test_logs, id='results-table-body')], id='results-table')
+                html.table(
+                    html.h2('Summary'),
+                    html.p('%i tests ran. in %i seconds' % (tests, test_time),
+                           html.br(),
+                           html.span('%i passed' % passes, class_='passed'), ', ',
+                           html.span('%i failed' % failures, class_='failed'), ', ',
+                           html.span('%i skipped' % skips, class_='skipped'), ', ',
+                           html.span('%i error' % errors, class_='error'),
+                           html.br()),
+                    html.h2('Results'),
+                    html.table([html.thead(
+                        html.tr([
+                            html.th('Result', class_='sortable', col='result'),
+                            html.th('Class', class_='sortable', col='class'),
+                            html.th('Test Name', class_='sortable', col='name'),
+                            html.th('Duration', class_='sortable numeric', col='duration'),
+                            html.th('Links')]), id='results-table-head'),
+                        html.tbody(test_logs, id='results-table-body')], id='results-table')
+                )
             )
         )
-        )
         return doc.unicode(indent=2)
+
+
+class GaiaTextTestRunner(MarionetteTextTestRunner):
+
+    resultclass = GaiaTestResult
+
 
 def main():
     cli(runner_class=GaiaTestRunner, parser_class=GaiaTestOptions)
