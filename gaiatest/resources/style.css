@@ -41,7 +41,7 @@ span.passed, .passed .col-result {
 	color: green;
 }
 span.skipped, .skipped .col-result {
-	color: skyblue;
+	color: orange;
 }
 span.failed,.failed .col-result {
 	color: orange;
